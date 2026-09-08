@@ -1,61 +1,90 @@
-function [L1_error_mean,L2_error_mean,L3_error_mean,mean_out,mean_X,lambda,X,u,quantile20,quantile80]  = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,ii,velocityShift,randeinzug)
-% Jacobi-Nachfrage 
-% Beta Verteilung auf der Kante mit einer fixen Geschwindigkeit
-% Rückgabe: durchschnittlicher L^1, L^2, L^3 Fehler, durchschnittlicher outflow,
-% durchschnittliche Demand
+function [L1_error_mean,L2_error_mean,L3_error_mean,mean_out,mean_X,lambda,X,u,quantile20,quantile80] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,ii,velocityShift,randeinzug,outputMode,applyBoundary,transportMethod,velocityShiftControl,lambdaIn,Xin)
+% Samples MCruns realizations of the Jacobi demand process and the
+% random speed lambda, computes the corresponding optimal inflow control
+% u, forward-simulates the resulting outflow, and returns the L1/L2/L3
+% error against the demand (trapezoidal rule over [randeinzug,T-randeinzug]).
+%
+% Merges what used to be four near-identical functions
+% (sampleSingleSpeedMC.m, sampleSingleSpeedMCcontinuous.m,
+% sampleSingleSpeedMCcontinuous_wrongBoundary.m, vergleicheProxy.m) via
+% five trailing, optional parameters (all default to the original
+% sampleSingleSpeedMC.m behaviour):
+%
+%   outputMode           'piecewise' (default) or 'continuous', see
+%                         computeOptimalU.m. dtU is the control-grid cell
+%                         width for 'piecewise'; pass dtU=dt for 'continuous'.
+%   applyBoundary         apply the Lambda(t) boundary restriction (3.2)
+%                         to the control (default true), see computeOptimalU.m.
+%   transportMethod       'trajec' (default; characteristics, exact) or
+%                         'upwind' (grid-based upwind scheme), see
+%                         transportUpwind_trajec.m / transportUpwind.m.
+%   velocityShiftControl  [lambdaMin,lambdaMax] assumed when *computing*
+%                         the control (default: same as velocityShift,
+%                         the range the outflow is actually *simulated*
+%                         under). Passing a different (e.g. near-
+%                         degenerate) interval here reproduces the old
+%                         "proxy" control evaluated against the true
+%                         stochastic dynamics.
+%   lambdaIn, Xin         reuse existing lambda/demand realizations
+%                         instead of sampling new ones (default: sample
+%                         fresh). Pass both to evaluate a different
+%                         control on the same random paths as an earlier
+%                         call, for a paired (fair) comparison.
+
+if nargin < 15 || isempty(outputMode);          outputMode = 'piecewise';   end
+if nargin < 16 || isempty(applyBoundary);       applyBoundary = true;       end
+if nargin < 17 || isempty(transportMethod);     transportMethod = 'trajec'; end
+if nargin < 18 || isempty(velocityShiftControl); velocityShiftControl = velocityShift; end
+if nargin < 19; lambdaIn = []; end
+if nargin < 20; Xin = []; end
 
 t_grid = 0:dt:T;
 
-% Sample Jacobi Nachfrage
-[t, X] = simulateJacobiTimeDep(d0, kappa, theta_fun, sigma, dt, T,MCruns);
-
-% Geschwindigkeit
-lambda = velocityShift(1)+(velocityShift(2)-velocityShift(1))*betarnd(alpha,beta,MCruns,1);
-%lambda = 0.5+ones(MCruns,1);
+if isempty(lambdaIn) || isempty(Xin)
+    % Sample Jacobi demand and speed
+    [t, X] = simulateJacobiTimeDep(d0, kappa, theta_fun, sigma, dt, T, MCruns);
+    lambda = velocityShift(1)+(velocityShift(2)-velocityShift(1))*betarnd(alpha,beta,MCruns,1);
+else
+    % Reuse existing realizations (paired comparison against a previous call)
+    t = t_grid;
+    X = Xin;
+    lambda = lambdaIn;
+end
 
 t_gridU = 0:dtU:T;
 
-u = computeOptimalU_Riemann_2(t_gridU, d0, kappa, theta_fun, alpha, beta, 5*10^-4,0,velocityShift);
+u = computeOptimalU(t_gridU, d0, kappa, theta_fun, 5*10^-4, velocityShiftControl, alpha, beta, applyBoundary, outputMode);
 
-% u = [u1, u2, ..., u10]   % stückweise konstant
+% u_t: expand the (piecewise-constant or fine-grid) control u onto t_grid.
 u_t = zeros(size(t_grid));
-
-N = length(u);  % Anzahl Intervalle
-
-for i = 1:N-1
-    idx = (t >= t_gridU(i)) & (t < t_gridU(i+1));
+N = length(u);
+for i = 1:N
+    if i < length(t_gridU)
+        idx = (t_grid >= t_gridU(i)) & (t_grid < t_gridU(i+1));
+    else
+        idx = t_grid >= t_gridU(i);
+    end
     u_t(idx) = u(i);
 end
-% Optional: letzter Punkt T
-u_t(t_grid >= t_gridU(end)) = u(end);
+u_t(t_grid >= t_gridU(end)) = u(end);   % exact endpoint t=T
 
-% Ausflussberechnung mit Upwind
-out = transportUpwind_trajec(lambda, u_t, dt, T);
+% Outflow
+switch transportMethod
+    case 'trajec'
+        out = transportUpwind_trajec(lambda, u_t, dt, T);
+    case 'upwind'
+        out = transportUpwind(lambda, u_t, dt, T);
+end
 
-
-% Plotting und Fehler
-colors = lines(MCruns);  % MATLAB-Farbpalette
+% Plotting (single realization + mean over all realizations)
 if plotBool
+    colors = lines(MCruns);
     figure(2*ii-1);
     hold on;
-    
     for k = 1:min(MCruns,1)
-        % Ausfluss Pfad k
-        out_k = out(k,:);
-    
-        % Jacobi-Pfad k
-        X_k = X(k,:);
-    
-        % Plot Ausfluss (solid)
-        plot(t, out_k, 'Color', colors(k,:), 'LineWidth', 1.5);
-    
-        % Plot Jacobi-Nachfrage (dotted)
-        plot(t, X_k, '--', 'Color', colors(k,:), 'LineWidth', 1);
-
-        
+        plot(t, out(k,:), 'Color', colors(k,:), 'LineWidth', 1.5);
+        plot(t, X(k,:), '--', 'Color', colors(k,:), 'LineWidth', 1);
     end
-
-
     xlabel('t');
     ylabel('Outflow / Demand');
     title('Outflow vs. Jacobi-Demand (Realizations)');
@@ -71,52 +100,35 @@ if plotBool
 
     figure(2*ii);
     hold on;
-    mean_out = mean(out);
-    mean_X = mean(X);
-    % Mittelwert Ausfluss (solid, blau)
-    plot(t, mean_out, '-b', 'LineWidth', 2);
-    
-    % Mittelwert Jacobi-Nachfrage (dotted, rot)
-    plot(t, mean_X, '--r', 'LineWidth', 2);
-    
+    plot(t, mean(out,1), '-b', 'LineWidth', 2);
+    plot(t, mean(X,1), '--r', 'LineWidth', 2);
     xlabel('t');
     ylabel('Outflow / Demand');
     title('Outflow vs. Jacobi-Demand (Realizations)');
     legend('Mean Outflow','Mean Demand');
     grid on;
     hold off;
-
 end
 
-% Anzahl Zeitschritte
-N = length(t);
-
-% Fehler pro Pfad ab t=2 bis t=9!!!
-
+% L1/L2/L3 error per path, trapezoidal rule over the interior window
+% [randeinzug, T-randeinzug]
 tminIdx = randeinzug/dt+1;
 tmaxIdx = (T-randeinzug)/dt+1;
-err2 = zeros(MCruns,1);
-err1 = zeros(MCruns,1);
-err3 = zeros(MCruns,1);
 Xerr = X(:,tminIdx:tmaxIdx);
 outErr = out(:,tminIdx:tmaxIdx);
+err1 = zeros(MCruns,1);
+err2 = zeros(MCruns,1);
+err3 = zeros(MCruns,1);
 for k = 1:MCruns
-    % Trapezregel über das Zeitgitter t
-    err1(k) = trapz(t(tminIdx:tmaxIdx), abs(Xerr(k,:) - outErr(k,:)));  % L1-Fehler
-    err2(k) = trapz(t(tminIdx:tmaxIdx), (Xerr(k,:) - outErr(k,:)).^2);  % L2-Fehler^2
-    err3(k) = trapz(t(tminIdx:tmaxIdx), (Xerr(k,:) - outErr(k,:)).^3);  % L3-Fehler^3
+    err1(k) = trapz(t(tminIdx:tmaxIdx), abs(Xerr(k,:) - outErr(k,:)));
+    err2(k) = trapz(t(tminIdx:tmaxIdx), (Xerr(k,:) - outErr(k,:)).^2);
+    err3(k) = trapz(t(tminIdx:tmaxIdx), (Xerr(k,:) - outErr(k,:)).^3);
 end
-
-% Mittelwert über alle MC-Pfade
 L1_error_mean = mean(err1);
 L2_error_mean = mean(err2);
 L3_error_mean = mean(err3);
 
-
-
-% Mittelwert über alle MC-Pfade
-mean_out = mean(out, 1);  % 1 x N
+mean_out = mean(out, 1);
+mean_X   = mean(X, 1);
 quantile20 = quantile(out,0.2,1);
 quantile80 = quantile(out,0.8,1);
-mean_X   = mean(X, 1);    % 1 x N
-
