@@ -60,8 +60,16 @@ for i = 1:length(dtU)
     [~,L2_error_mean,~,meanOutPWC{i},~,lambda,X,u_all{i},~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug);
     l2(i) = L2_error_mean;
 
-    % Piecewise-constant + proxy (reuses the lambda, X realizations from above)
-    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug,'piecewise',true,'upwind',[2-1000*eps,2+1000*eps],lambda,X);
+    % Piecewise-constant + proxy (reuses the lambda, X realizations from above).
+    % applyBoundary=false: the proxy control ubar(t)=m(t+1/lambdabar) (paper
+    % eq. 3.8) has no Lambda(t)/boundary-restriction machinery at all - unlike
+    % the true stochastic control, there is no distribution of arrival times
+    % to correct for. Applying the boundary restriction to this near-Dirac
+    % velocityShiftControl was found to make it drop hard to 0 (piecewise:
+    % NaN from a 0/0 aggregation, silently zeroed by transportUpwind.m's
+    % isfinite guard) for t > T-1/lambdabar, contaminating any error window
+    % that reaches that far (as Figure 6 (right)'s does).
+    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug,'piecewise',false,'upwind',[2-1000*eps,2+1000*eps],lambda,X);
     l2P(i) = L2_error_cont;
 
     % Continuous-time optimal control and continuous + proxy do not depend
@@ -70,7 +78,8 @@ for i = 1:length(dtU)
         [~,L2_error_cont,~,mean_out,~,lambda,X,u,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind');
         l2C(:) = L2_error_cont;
 
-        [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind',[2-1000*eps,2+1000*eps]);
+        % applyBoundary=false - see comment on the l2P proxy call above.
+        [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',false,'upwind',[2-1000*eps,2+1000*eps]);
         l2PC(:) = L2_error_contP;
     end
 end
@@ -186,26 +195,34 @@ for i = 1:length(shifts)
     [~,L2_error_mean,~,~,~,lambda,X,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,i,velocityShift,randeinzug);
     l2(i) = L2_error_mean;
 
-    % Piecewise-constant + proxy
-    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,i,velocityShift,randeinzug,'piecewise',true,'upwind',[2-1000*eps,2+1000*eps],lambda,X);
+    % Piecewise-constant + proxy. applyBoundary=false - see the detailed
+    % comment on the equivalent call in the Figure 2 & 3 section above:
+    % the paper's proxy control has no Lambda(t) restriction at all, and
+    % applying one to this near-Dirac velocityShiftControl degrades to 0
+    % (NaN, silently zeroed) past t=T-1/lambdabar. Harmless for this
+    % section's own randeinzug=2 window (which excludes that region
+    % anyway), fixed here too for consistency/correctness.
+    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,i,velocityShift,randeinzug,'piecewise',false,'upwind',[2-1000*eps,2+1000*eps],lambda,X);
     l2P(i) = L2_error_cont;
 
     % Continuous-time optimal control
     [~,L2_error_cont,~,meanOutC{i},~,lambda,X,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind');
     l2C(i) = L2_error_cont;
 
-    % Continuous + proxy
-    [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind',[2-1000*eps,2+1000*eps]);
+    % Continuous + proxy. applyBoundary=false - see above.
+    [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',false,'upwind',[2-1000*eps,2+1000*eps]);
     l2PC(i) = L2_error_contP;
 
     % Deterministic-velocity reference (lambda essentially fixed at 2):
     % independent of the shift, so only computed once (i==1) and
-    % broadcast across the sweep.
+    % broadcast across the sweep. applyBoundary=false here too - the
+    % velocityShift itself (not just velocityShiftControl) is the near-Dirac
+    % interval, so the same Lambda(t) degradation applies.
     if i == 1
-        [~,L2_error_contD,~,mean_outD,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,[2-1000*eps,2+1000*eps],randeinzug,'continuous',true,'upwind');
+        [~,L2_error_contD,~,mean_outD,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,[2-1000*eps,2+1000*eps],randeinzug,'continuous',false,'upwind');
         l2D(:) = L2_error_contD;
 
-        [~,L2_error_contPD,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,i,[2-1000*eps,2+1000*eps],randeinzug);
+        [~,L2_error_contPD,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,i,[2-1000*eps,2+1000*eps],randeinzug,[],false);
         l2PD(:) = L2_error_contPD;
     end
 end
@@ -271,9 +288,7 @@ hold off
 %% Figure 6: Boundary effects of the fixed observation window
 % Paper Section 6.4. lambda ~ U([1,3]), T=6 (chosen small to emphasize the
 % boundary region), comparing the corrected optimal control u*(t) against
-% the "unconditioned interior expression" E_lambda[m(t+1/lambda)]. The
-% latter is obtained via the *_wrongBoundary functions, i.e. without
-% restricting to the admissible arrival-time set Lambda(t) from (3.2).
+% the "unconditioned interior expression" E_lambda[m(t+1/lambda)]. 
 % Reuses theta_fun, d0, kappa, sigma, dt, alpha, beta from the Figure 2 & 3
 % setup above.
 
@@ -306,34 +321,59 @@ title('Comparison of optimal control and unconditioned interior control')
 % Same dtU-sweep and error/fit structure as Figure 3, but evaluated over
 % the full objective (randeinzug=0, i.e. no interior trimming) at T=6
 % instead of the interior-only window from Figure 2/3's T=16 setting.
-% Paper: "the numerical experiment exhibits a convergence rate close to
-% 2 for the full objective as well" (Sec. 6.4, Lemma 4.6).
 
-randeinzug = 0;       % full objective H(u) over [0,T], no interior trimming
+
+randeinzug = 0;       % kept for the control (u/uWB) calls above; the error
+                       % window below is set explicitly via tMin/tMax instead
 dtU = 2.^(1:-1:-4);   % |Pi_n| = 2^k, k = -4,...,1, same range as Figure 3
+
+% Error-evaluation window: the paper's observation window
+% I_obs=[1/lambdaMIN,T] (Sec. 3.1), not [0,T]. For t<1/lambdaMIN no
+% realization can have an arrival yet, so the outflow there is provably 0
+% regardless of the control/discretization - comparing that against the
+% (nonzero) demand only adds control-independent, per-MC-draw noise to
+% the error, without carrying any information about convergence.
+tMinErr = 1/lambdaMIN;
+tMaxErr = T;
 
 l2   = zeros(length(dtU),1);   % piecewise-constant
 l2P  = zeros(length(dtU),1);   % piecewise-constant + proxy
 l2C  = zeros(length(dtU),1);   % continuous
 l2PC = zeros(length(dtU),1);   % continuous + proxy
 
+% Common random numbers: lambda/X are sampled once (i==1, via the first
+% sampleSingleSpeedMC call below leaving lambdaIn/Xin empty) and then
+% reused - for every dtU value and for the continuous reference - instead
+% of resampling fresh realizations at every sweep point. l2, l2P, l2C,
+% l2PC then differ only in the control/discretization applied to the SAME
+% underlying realizations, removing an independent Monte Carlo noise
+% source from the y2/y3 differences plotted below.
+lambda = [];
+X = [];
+
 tic()
 for i = 1:length(dtU)
     i
 
-    [~,L2_error_mean,~,~,~,lambda,X,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug);
+    [~,L2_error_mean,~,~,~,lambda,X,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug,[],[],[],[],lambda,X,tMinErr,tMaxErr);
     l2(i) = L2_error_mean;
 
-    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug,'piecewise',true,'upwind',[2-1000*eps,2+1000*eps],lambda,X);
+    % applyBoundary=false: see the detailed comment on the equivalent call
+    % in the Figure 2 & 3 section. This is the call that originally
+    % surfaced the bug - Figure 6 (right)'s window [1/lambdaMIN,T] is the
+    % only one that reaches far enough right (t>T-1/lambdabar=5.5) to be
+    % affected by it.
+    [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU(i),plotBool,i,velocityShift,randeinzug,'piecewise',false,'upwind',[2-1000*eps,2+1000*eps],lambda,X,tMinErr,tMaxErr);
     l2P(i) = L2_error_cont;
 
     % Continuous-time optimal control and continuous + proxy do not depend
     % on dtU, so they are computed once (i==1) and broadcast across the sweep.
     if i == 1
-        [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind');
+        [~,L2_error_cont,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind',[],lambda,X,tMinErr,tMaxErr);
         l2C(:) = L2_error_cont;
 
-        [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',true,'upwind',[2-1000*eps,2+1000*eps]);
+        % applyBoundary=false - see above.
+        [~,L2_error_contP,~,~,~,~,~,~,~,~] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dt,plotBool,i,velocityShift,randeinzug,'continuous',false,'upwind',[2-1000*eps,2+1000*eps],lambda,X,tMinErr,tMaxErr);
         l2PC(:) = L2_error_contP;
     end
 end

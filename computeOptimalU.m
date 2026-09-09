@@ -1,10 +1,7 @@
 function u_vals = computeOptimalU(t_grid, d0, kappa, theta_fun, dt_int, velocityShift, alpha, beta, applyBoundary, outputMode)
 % Optimal inflow control, per Theorem 3.1 (continuous-time) /
-% Proposition 3.3 (piecewise-constant) of the paper. Merges what used to
-% be three near-identical functions (computeOptimalU_Riemann_2.m,
-% computeOptimalU_continuous_2.m, computeOptimalU_Riemann_2_wrongBoundary.m)
-% into two independent switches:
-%
+% Proposition 3.3 (piecewise-constant) of the paper. 
+% Considering two independent switches:
 %   applyBoundary (logical): true restricts the averaging weight to the
 %     admissible arrival-time set Lambda(t) from (3.2), i.e. the
 %     boundary-corrected control u*(t) (Theorem 3.1); false uses the

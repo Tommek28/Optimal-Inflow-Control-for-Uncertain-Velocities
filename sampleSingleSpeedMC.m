@@ -1,14 +1,9 @@
-function [L1_error_mean,L2_error_mean,L3_error_mean,mean_out,mean_X,lambda,X,u,quantile20,quantile80] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,ii,velocityShift,randeinzug,outputMode,applyBoundary,transportMethod,velocityShiftControl,lambdaIn,Xin)
+function [L1_error_mean,L2_error_mean,L3_error_mean,mean_out,mean_X,lambda,X,u,quantile20,quantile80] = sampleSingleSpeedMC(T,alpha,beta,MCruns,theta_fun,d0,kappa,sigma,dt,dtU,plotBool,ii,velocityShift,randeinzug,outputMode,applyBoundary,transportMethod,velocityShiftControl,lambdaIn,Xin,tMin,tMax)
 % Samples MCruns realizations of the Jacobi demand process and the
 % random speed lambda, computes the corresponding optimal inflow control
 % u, forward-simulates the resulting outflow, and returns the L1/L2/L3
 % error against the demand (trapezoidal rule over [randeinzug,T-randeinzug]).
-%
-% Merges what used to be four near-identical functions
-% (sampleSingleSpeedMC.m, sampleSingleSpeedMCcontinuous.m,
-% sampleSingleSpeedMCcontinuous_wrongBoundary.m, vergleicheProxy.m) via
-% five trailing, optional parameters (all default to the original
-% sampleSingleSpeedMC.m behaviour):
+% For the paper we only use the L2-error.
 %
 %   outputMode           'piecewise' (default) or 'continuous', see
 %                         computeOptimalU.m. dtU is the control-grid cell
@@ -30,6 +25,17 @@ function [L1_error_mean,L2_error_mean,L3_error_mean,mean_out,mean_X,lambda,X,u,q
 %                         fresh). Pass both to evaluate a different
 %                         control on the same random paths as an earlier
 %                         call, for a paired (fair) comparison.
+%   tMin, tMax            absolute error-evaluation window [tMin,tMax]
+%                         (default: [randeinzug, T-randeinzug], i.e. the
+%                         symmetric trim randeinzug already describes).
+%                         Pass explicitly for an asymmetric window - e.g.
+%                         the paper's observation window I_obs=[1/lambdaMIN,T]
+%                         (Sec. 3.1): unlike a symmetric trim, this
+%                         excludes only the initial segment [0,1/lambdaMIN)
+%                         where the outflow is provably 0 regardless of
+%                         the control (no realization can have an arrival
+%                         yet), instead of also cutting away genuine
+%                         boundary behavior at t=T.
 
 if nargin < 15 || isempty(outputMode);          outputMode = 'piecewise';   end
 if nargin < 16 || isempty(applyBoundary);       applyBoundary = true;       end
@@ -37,6 +43,8 @@ if nargin < 17 || isempty(transportMethod);     transportMethod = 'trajec'; end
 if nargin < 18 || isempty(velocityShiftControl); velocityShiftControl = velocityShift; end
 if nargin < 19; lambdaIn = []; end
 if nargin < 20; Xin = []; end
+if nargin < 21 || isempty(tMin); tMin = randeinzug;   end
+if nargin < 22 || isempty(tMax); tMax = T - randeinzug; end
 
 t_grid = 0:dt:T;
 
@@ -110,10 +118,10 @@ if plotBool
     hold off;
 end
 
-% L1/L2/L3 error per path, trapezoidal rule over the interior window
-% [randeinzug, T-randeinzug]
-tminIdx = randeinzug/dt+1;
-tmaxIdx = (T-randeinzug)/dt+1;
+% L1/L2/L3 error per path, trapezoidal rule over the evaluation window
+% [tMin, tMax]
+tminIdx = tMin/dt+1;
+tmaxIdx = tMax/dt+1;
 Xerr = X(:,tminIdx:tmaxIdx);
 outErr = out(:,tminIdx:tmaxIdx);
 err1 = zeros(MCruns,1);

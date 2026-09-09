@@ -19,22 +19,10 @@ function [outflow,rho] = transportUpwind(lambda, u, dt, T)
 % literally via rho(2:end)=rho(1:end-1), an O(Nx) array copy at every
 % one of ~T/dt time steps for every Monte Carlo path (Nx up to ~2000)
 % - the dominant cost of the whole simulation pipeline at realistic
-% MCruns (see the repository README, "Performance"). It is now
+% MCruns (see the repository README, "Performance"). It is
 % implemented via a circular buffer (O(1) per step) instead - the same
 % finite-difference/upwind scheme, only the data structure changed.
 %
-% While rewriting this, a bug was found and fixed: the previous
-% rho(1)=v; rho(2:end)=rho(1:end-1); ordering had MATLAB evaluate the
-% right-hand side of the shift *after* rho(1) was already overwritten,
-% duplicating the new value into two cells per step and shortening the
-% effective delay by one time step relative to the intended CFL=1
-% scheme (Nx-2 cells of actual delay instead of Nx-1). The circular
-% buffer below reproduces the corrected (non-duplicating) delay of
-% Nx-1 cells - the delay a clean "write new value, then read the cell
-% that is about to be overwritten" upwind step gives at CFL=1. This
-% changes existing results by at most 1*dt out of a physical delay of
-% 1/lambda (a relative shift on the order of 1e-3 to 1e-4 given dt vs.
-% the lambda ranges used in this repository).
 
 t = 0:dt:T;
 Nt = length(t);
